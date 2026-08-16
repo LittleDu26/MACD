@@ -28,6 +28,8 @@ if __name__ == "__main__":
                         help='')
     parser.add_argument('--save_to', type=str, default='',
                         help='save_to')
+    parser.add_argument('--suffix', type=str, default='',
+                        help='experiment name suffix, e.g. XX -> MACD(XX)')
     parser.add_argument('--distill', action='store_true',
                         help='')
     parser.add_argument('--controller_type', type=str, default='daab',
@@ -69,6 +71,8 @@ if __name__ == "__main__":
             temp_save_to += "_noM"
         if not args.distill:
             temp_save_to += "_noS"
+        if args.suffix:
+            temp_save_to += f"({args.suffix})"
         for i in range(num):
             args.save_to=os.path.join(temp_save_to,args.env,str(i))
             if not os.path.exists(args.save_to):
