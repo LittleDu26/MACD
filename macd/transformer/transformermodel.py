@@ -118,7 +118,7 @@ class TransformerModel(nn.Module):
         self.decoder[-2].weight.data.uniform_(-initrange, initrange)
 
     def forward(self, modular_state, other_state, obs_mask, obs_coord,
-                attn_mask=None, return_attn=False):
+                attn_mask=None, return_attn=False, return_hidden_states=False):
         
         # Linear Porjection of local observation
 
@@ -157,12 +157,27 @@ class TransformerModel(nn.Module):
                 obs_embed = torch.cat([obs_embed,obs_coord],axis=2)
             else:
                 obs_embed = self.pos_embedding(obs_embed)
-            if return_attn:
+            if return_attn and return_hidden_states:
+                obs_embed_t, attn_weights, hidden_states = self.transformer_encoder(
+                    obs_embed,
+                    mask=attn_mask,
+                    src_key_padding_mask=obs_mask,
+                    return_attn=True,
+                    return_hidden_states=True,
+                )
+            elif return_attn:
                 obs_embed_t, attn_weights = self.transformer_encoder(
                     obs_embed,
                     mask=attn_mask,
                     src_key_padding_mask=obs_mask,
                     return_attn=True,
+                )
+            elif return_hidden_states:
+                obs_embed_t, hidden_states = self.transformer_encoder(
+                    obs_embed,
+                    mask=attn_mask,
+                    src_key_padding_mask=obs_mask,
+                    return_hidden_states=True,
                 )
             else:
                 obs_embed_t = self.transformer_encoder(
@@ -181,8 +196,12 @@ class TransformerModel(nn.Module):
         output = output.permute(1,0,2)
         output = output.reshape(batch_size,-1)
         # output = output.reshape(batch_size,num_modular,-1)
+        if return_attn and return_hidden_states:
+            return output, attn_weights, hidden_states
         if return_attn:
             return output, attn_weights
+        if return_hidden_states:
+            return output, hidden_states
         return output
 
 class PositionalEncoding(nn.Module):

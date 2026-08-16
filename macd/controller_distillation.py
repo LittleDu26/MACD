@@ -3,6 +3,7 @@ import copy
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 
 from evogym import get_full_connectivity
@@ -100,7 +101,11 @@ def collect_parent_rollout_obs(parent_controller, parent_robot, env_name, seed, 
 def attention_distill_warmup(parent_controller, child_controller, observations,
                              parent_robot, child_robot, device,
                              batch_size=64, warmup_epochs=2, lr_warm=5e-4,
-                             gradient_clip=0.5, lambda_col=1.0):
+                             gradient_clip=0.5,
+                             loss_type="shared_attention_feature",
+                             lambda_attention=1.0, lambda_feature=1.0,
+                             lambda_col=1.0):
+    _validate_distillation_config(loss_type, lambda_attention, lambda_feature)
     if not observations or should_skip_warmup(parent_robot, child_robot):
         return
 
@@ -124,18 +129,45 @@ def attention_distill_warmup(parent_controller, child_controller, observations,
 
             loss = 0.0  # 初始化损失累加器。
             for net_name in ("mu", "v"):  # 对两个头进行蒸馏。
-                with torch.no_grad():  # 禁用父模型梯度。
-                    _, parent_attn = parent_controller.ac.attention_forward(  # 父模型注意力。
-                        parent_batch, net_name=net_name  # 输入与掩码。
-                    )  # 结束父模型前向。
-                    s_parent = _column_importance(parent_attn, parent_indices)  # 父模型列重要性。
-                _, child_attn = child_controller.ac.attention_forward(  # 子模型注意力。
-                    child_batch, net_name=net_name  # 输入与掩码。
-                )  # 结束子模型前向。
-                s_child = _column_importance(child_attn, child_indices)  # 子模型列重要性。
-                loss = loss + _kl_divergence(s_parent.detach(), s_child)  # 累加 KL 损失。
+                if loss_type == "column_kl":
+                    with torch.no_grad():  # 禁用父模型梯度。
+                        _, parent_attn = parent_controller.ac.attention_forward(
+                            parent_batch, net_name=net_name
+                        )
+                        s_parent = _column_importance(parent_attn, parent_indices)
+                    _, child_attn = child_controller.ac.attention_forward(
+                        child_batch, net_name=net_name
+                    )
+                    s_child = _column_importance(child_attn, child_indices)
+                    loss = loss + lambda_col * _kl_divergence(
+                        s_parent.detach(), s_child
+                    )
+                else:
+                    with torch.no_grad():
+                        _, parent_attn, parent_hidden = (
+                            parent_controller.ac.attention_forward(
+                                parent_batch,
+                                net_name=net_name,
+                                return_hidden_states=True,
+                            )
+                        )
+                    _, child_attn, child_hidden = child_controller.ac.attention_forward(
+                        child_batch,
+                        net_name=net_name,
+                        return_hidden_states=True,
+                    )
+                    attention_loss = _shared_attention_kl(
+                        parent_attn, child_attn, parent_indices, child_indices
+                    )
+                    feature_loss = _shared_feature_loss(
+                        parent_hidden, child_hidden, parent_indices, child_indices
+                    )
+                    loss = (
+                        loss
+                        + lambda_attention * attention_loss
+                        + lambda_feature * feature_loss
+                    )
 
-            loss = loss * lambda_col  # 缩放损失。
             optimizer.zero_grad()  # 清空梯度。
             loss.backward()  # 反向传播。
             nn.utils.clip_grad_norm_(trainable, gradient_clip)  # 梯度裁剪。
@@ -174,6 +206,15 @@ def prepare_distilled_controller(agent, ppo_args, trans_args, sample_setting, ar
         parent.robot,
         agent.robot,
         device,
+        loss_type=getattr(
+            trans_args, "attention_distill_loss", "shared_attention_feature"
+        ),
+        lambda_attention=getattr(
+            trans_args, "attention_distill_lambda_a", 1.0
+        ),
+        lambda_feature=getattr(
+            trans_args, "attention_distill_lambda_h", 1.0
+        ),
     )
     return child_controller
 
@@ -281,6 +322,95 @@ def _kl_divergence(parent_scores, child_scores, eps=1e-8):
     parent_scores = parent_scores.clamp_min(eps)
     child_scores = child_scores.clamp_min(eps)
     return (parent_scores * (parent_scores.log() - child_scores.log())).sum(dim=-1).mean()
+
+
+def _validate_distillation_config(loss_type, lambda_attention, lambda_feature):
+    valid_loss_types = {"column_kl", "shared_attention_feature"}
+    if loss_type not in valid_loss_types:
+        raise ValueError(
+            "Unknown attention distillation loss {!r}; expected one of {}".format(
+                loss_type, sorted(valid_loss_types)
+            )
+        )
+    if lambda_attention < 0 or lambda_feature < 0:
+        raise ValueError("Attention distillation loss weights must be non-negative")
+
+
+def _attention_with_head_dimension(attention):
+    if attention.dim() == 3:
+        return attention.unsqueeze(1)
+    if attention.dim() != 4:
+        raise ValueError(
+            "Expected attention shaped [B, H, Q, K] or [B, Q, K], got {}".format(
+                tuple(attention.shape)
+            )
+        )
+    return attention
+
+
+def _shared_attention_kl(parent_attention, child_attention,
+                         parent_indices, child_indices, eps=1e-8):
+    if len(parent_attention) != len(child_attention) or not parent_attention:
+        raise ValueError("Parent and child must expose the same non-zero number of layers")
+
+    layer_losses = []
+    for parent_layer, child_layer in zip(parent_attention, child_attention):
+        parent_layer = _attention_with_head_dimension(parent_layer)
+        child_layer = _attention_with_head_dimension(child_layer)
+        parent_shared = parent_layer.index_select(-2, parent_indices).index_select(
+            -1, parent_indices
+        ).detach()
+        child_shared = child_layer.index_select(-2, child_indices).index_select(
+            -1, child_indices
+        )
+        if parent_shared.shape != child_shared.shape:
+            raise ValueError(
+                "Parent and child shared attention shapes differ: {} vs {}".format(
+                    tuple(parent_shared.shape), tuple(child_shared.shape)
+                )
+            )
+        parent_shared = parent_shared / (
+            parent_shared.sum(dim=-1, keepdim=True) + eps
+        )
+        child_shared = child_shared / (
+            child_shared.sum(dim=-1, keepdim=True) + eps
+        )
+        parent_shared = parent_shared.clamp_min(eps)
+        child_shared = child_shared.clamp_min(eps)
+        layer_losses.append(
+            (
+                parent_shared
+                * (parent_shared.log() - child_shared.log())
+            ).sum(dim=-1).mean()
+        )
+    return torch.stack(layer_losses).mean()
+
+
+def _shared_feature_loss(parent_hidden, child_hidden,
+                         parent_indices, child_indices):
+    if len(parent_hidden) != len(child_hidden) or not parent_hidden:
+        raise ValueError("Parent and child must expose the same non-zero number of layers")
+
+    layer_losses = []
+    for parent_layer, child_layer in zip(parent_hidden, child_hidden):
+        parent_shared = parent_layer.index_select(0, parent_indices).permute(1, 0, 2)
+        child_shared = child_layer.index_select(0, child_indices).permute(1, 0, 2)
+        if parent_shared.shape != child_shared.shape:
+            raise ValueError(
+                "Parent and child shared feature shapes differ: {} vs {}".format(
+                    tuple(parent_shared.shape), tuple(child_shared.shape)
+                )
+            )
+        normalized_parent = F.layer_norm(
+            parent_shared.detach(), (parent_shared.shape[-1],)
+        )
+        normalized_child = F.layer_norm(
+            child_shared, (child_shared.shape[-1],)
+        )
+        layer_losses.append(
+            (normalized_parent - normalized_child).pow(2).sum(dim=-1).mean()
+        )
+    return torch.stack(layer_losses).mean()
 
 
 def _enable_qk_layernorm(controller):

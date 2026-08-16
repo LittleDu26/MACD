@@ -118,7 +118,8 @@ class TransformerPPOAC(nn.Module):
         xx, yy = torch.meshgrid(x, y, indexing="ij")
         return torch.stack([xx.reshape(-1), yy.reshape(-1)], dim=1).float() / scale
 
-    def attention_forward(self, state, net_name="mu", attn_mask=None):
+    def attention_forward(self, state, net_name="mu", attn_mask=None,
+                          return_hidden_states=False):
         batch_size = state["modular"].shape[0]
         obs_padding = state["obs_mask"].bool()
         net = self.mu_net if net_name == "mu" else self.v_net
@@ -131,10 +132,12 @@ class TransformerPPOAC(nn.Module):
                 return net(
                     daab_state, state["other"], voxel_type, grid_pos,
                     token_index, obs_padding, return_attention=True,
+                    return_hidden_states=return_hidden_states,
                 )
             return net(
                 daab_state, state["other"], voxel_type, grid_pos,
                 obs_padding, return_attention=True,
+                return_hidden_states=return_hidden_states,
             )
 
         modular_state = state["modular"].reshape(batch_size, self.sequence_size, -1).permute(1, 0, 2)
@@ -142,6 +145,7 @@ class TransformerPPOAC(nn.Module):
         return net(
             modular_state, state["other"], obs_padding, obs_coord,
             attn_mask=attn_mask, return_attn=True,
+            return_hidden_states=return_hidden_states,
         )
 
 

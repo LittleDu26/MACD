@@ -246,7 +246,7 @@ class DAABAttention(nn.Module):
         output = self.out_proj(output).permute(1, 0, 2)
 
         if return_attention:
-            return output, attn.mean(dim=1)
+            return output, attn
         return output, None
 
 
@@ -284,8 +284,10 @@ class DAABTransformerEncoder(nn.Module):
             ]
         )
 
-    def forward(self, src, daab_bias, key_padding_mask=None, return_attention=False):
+    def forward(self, src, daab_bias, key_padding_mask=None, return_attention=False,
+                return_hidden_states=False):
         attention_maps = []
+        hidden_states = []
         output = src
         for layer in self.layers:
             output, attn = layer(
@@ -293,6 +295,10 @@ class DAABTransformerEncoder(nn.Module):
             )
             if return_attention:
                 attention_maps.append(attn)
+            if return_hidden_states:
+                hidden_states.append(output)
+        if return_hidden_states:
+            return output, attention_maps if return_attention else None, hidden_states
         return output, attention_maps if return_attention else None
 
 
@@ -381,14 +387,20 @@ class DAABActor(nn.Module):
             self.position_embedding_mode,
         )
 
-    def forward(self, obs, other_state, voxel_type, grid_pos, token_index, obs_mask, return_attention=False):
+    def forward(self, obs, other_state, voxel_type, grid_pos, token_index, obs_mask,
+                return_attention=False, return_hidden_states=False):
         obs = scale_daab_observation(obs, self.center_scale, self.velocity_scale)
         encoded = self.encoder(obs, voxel_type, obs_mask) * math.sqrt(self.embedding_dim)
         encoded = encoded + self.pos_embedding(grid_pos)
         daab_bias = self.daab_bias(obs)
-        z, attention_maps = self.transformer(
-            encoded.permute(1, 0, 2), daab_bias, key_padding_mask=obs_mask, return_attention=return_attention
+        transformer_result = self.transformer(
+            encoded.permute(1, 0, 2), daab_bias, key_padding_mask=obs_mask,
+            return_attention=return_attention, return_hidden_states=return_hidden_states,
         )
+        if return_hidden_states:
+            z, attention_maps, hidden_states = transformer_result
+        else:
+            z, attention_maps = transformer_result
         z = z.permute(1, 0, 2)
         other = other_state.unsqueeze(1).repeat(1, self.sequence_size, 1)
         decoder_input = torch.cat([z, other, obs], dim=-1) if self.condition_decoder else torch.cat([z, other], dim=-1)
@@ -405,6 +417,8 @@ class DAABActor(nn.Module):
         scatter_index = token_index.long().clamp(min=0, max=self.sequence_size - 1)
         output.scatter_(1, scatter_index, token_output)
         check_finite_tensor("actor_mean", output)
+        if return_hidden_states:
+            return output, attention_maps, hidden_states
         return output, attention_maps
 
 
@@ -508,6 +522,7 @@ class DAABCritic(nn.Module):
         grid_pos,
         obs_mask,
         return_attention=False,
+        return_hidden_states=False,
     ):
         if design_obs.dim() == 2:
             design_obs = design_obs.unsqueeze(0)
@@ -528,16 +543,23 @@ class DAABCritic(nn.Module):
         grid_pos = grid_pos.reshape(batch_size, self.sequence_size, 2)
         other_state = other_state.reshape(batch_size, -1)
 
-        value, attention_maps = self.forward(
+        result = self.forward(
             design_daab_obs,
             other_state,
             design_voxel_type,
             grid_pos,
             design_mask,
             return_attention=return_attention,
+            return_hidden_states=return_hidden_states,
             daab_bias_obs=daab_obs,
         )
+        if return_hidden_states:
+            value, attention_maps, hidden_states = result
+        else:
+            value, attention_maps = result
         check_finite_tensor("design_critic_value", value)
+        if return_hidden_states:
+            return value, attention_maps, hidden_states
         return value, attention_maps
 
     def forward(
@@ -548,6 +570,7 @@ class DAABCritic(nn.Module):
         grid_pos,
         obs_mask,
         return_attention=False,
+        return_hidden_states=False,
         daab_bias_obs=None,
     ):
         # The design critic replaces obs[..., :8] with material-neighborhood
@@ -572,9 +595,14 @@ class DAABCritic(nn.Module):
         encoded = self.encoder(obs, voxel_type, obs_mask) * math.sqrt(self.embedding_dim)
         encoded = encoded + self.pos_embedding(grid_pos)
         daab_bias = self.daab_bias(daab_bias_obs)
-        z, attention_maps = self.transformer(
-            encoded.permute(1, 0, 2), daab_bias, key_padding_mask=obs_mask, return_attention=return_attention
+        transformer_result = self.transformer(
+            encoded.permute(1, 0, 2), daab_bias, key_padding_mask=obs_mask,
+            return_attention=return_attention, return_hidden_states=return_hidden_states,
         )
+        if return_hidden_states:
+            z, attention_maps, hidden_states = transformer_result
+        else:
+            z, attention_maps = transformer_result
         z = z.permute(1, 0, 2)
         other = other_state.unsqueeze(1).repeat(1, self.sequence_size, 1)
         decoder_input = torch.cat([z, other, obs], dim=-1) if self.condition_decoder else torch.cat([z, other], dim=-1)
@@ -590,4 +618,6 @@ class DAABCritic(nn.Module):
         denom = valid.float().sum(dim=1, keepdim=True).clamp(min=1.0)
         value = (token_values * valid.float()).sum(dim=1, keepdim=True) / denom
         check_finite_tensor("critic_value", value)
+        if return_hidden_states:
+            return value, attention_maps, hidden_states
         return value, attention_maps

@@ -358,6 +358,9 @@ def prepare_controller_arms(
         parent_body,
         child_body,
         device,
+        loss_type=trans_args.attention_distill_loss,
+        lambda_attention=trans_args.attention_distill_lambda_a,
+        lambda_feature=trans_args.attention_distill_lambda_h,
     )
     set_all_seeds(seed)
     attention_distill_warmup(
@@ -367,6 +370,9 @@ def prepare_controller_arms(
         parent_body,
         child_body,
         device,
+        loss_type=trans_args.attention_distill_loss,
+        lambda_attention=trans_args.attention_distill_lambda_a,
+        lambda_feature=trans_args.attention_distill_lambda_h,
     )
     warmup_changes = {
         "distill_only": changed_parameter_names(

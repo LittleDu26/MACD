@@ -38,7 +38,7 @@ class TransformerEncoder(nn.Module):
         self.norm = norm
 
     def forward(self, src, mask=None, src_key_padding_mask=None,
-                return_attn=False):
+                return_attn=False, return_hidden_states=False):
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -52,6 +52,7 @@ class TransformerEncoder(nn.Module):
         output = src
 
         attn_weights = []
+        hidden_states = []
         for l in self.layers:
             if return_attn:
                 output, attn = l(
@@ -63,12 +64,18 @@ class TransformerEncoder(nn.Module):
                 attn_weights.append(attn)
             else:
                 output = l(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
+            if return_hidden_states:
+                hidden_states.append(output)
 
         if self.norm is not None:
             output = self.norm(output)
 
+        if return_attn and return_hidden_states:
+            return output, attn_weights, hidden_states
         if return_attn:
             return output, attn_weights
+        if return_hidden_states:
+            return output, hidden_states
         return output
 
 class TransformerEncoderLayerResidual(nn.Module):

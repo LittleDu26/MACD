@@ -39,6 +39,12 @@ class transformerconfig:
 
         self.attention_layers=1
 
+        self.attention_distill_loss = "shared_attention_feature"
+
+        self.attention_distill_lambda_a = 1.0
+
+        self.attention_distill_lambda_h = 1.0
+
         self.dropout_rate=0.0
 
         self.transformer_norm=False
