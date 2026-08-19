@@ -3,8 +3,10 @@ import unittest
 import torch
 
 from macd.controller_distillation import (
+    DISTILL_LOSS_TYPES,
     _column_importance,
     _shared_attention_kl,
+    _shared_branch_loss,
     _shared_feature_loss,
     _validate_distillation_config,
 )
@@ -28,6 +30,107 @@ class AttentionDistillationLossTest(unittest.TestCase):
             _validate_distillation_config("unknown", 1.0, 1.0)
         with self.assertRaises(ValueError):
             _validate_distillation_config("shared_attention_feature", -1.0, 1.0)
+
+    def test_validate_accepts_all_four_loss_modes(self):
+        for loss_type in DISTILL_LOSS_TYPES:
+            _validate_distillation_config(loss_type, 1.0, 1.0)
+
+    def test_distill_loss_types_constant(self):
+        self.assertEqual(
+            set(DISTILL_LOSS_TYPES),
+            {
+                "column_kl",
+                "shared_attention",
+                "shared_feature",
+                "shared_attention_feature",
+            },
+        )
+
+    def test_shared_branch_component_splitting(self):
+        parent_attn = torch.tensor(
+            [[[[0.8, 0.2], [0.1, 0.9]], [[0.3, 0.7], [0.6, 0.4]]]],
+            dtype=torch.float32,
+        )
+        child_attn = torch.tensor(
+            [[[[0.2, 0.8], [0.9, 0.1]], [[0.7, 0.3], [0.4, 0.6]]]],
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        parent_hidden = torch.tensor(
+            [
+                [[1.0, 2.0, 4.0]],
+                [[3.0, 2.0, 1.0]],
+                [[2.0, 5.0, 1.0]],
+            ]
+        )
+        child_hidden = parent_hidden.clone()
+        child_hidden[0, 0, 0] += 1.0
+        child_hidden.requires_grad_(True)
+        indices = torch.tensor([0, 1])
+
+        attn_only = _shared_attention_kl(
+            [parent_attn], [child_attn], indices, indices
+        )
+        feat_only = _shared_feature_loss(
+            [parent_hidden], [child_hidden], indices, indices
+        )
+        self.assertGreater(attn_only.item(), 0.0)
+        self.assertGreater(feat_only.item(), 0.0)
+
+        combined = _shared_branch_loss(
+            [parent_attn],
+            [child_attn],
+            [parent_hidden],
+            [child_hidden],
+            indices,
+            indices,
+            "shared_attention_feature",
+            1.0,
+            1.0,
+        )
+        attn_branch = _shared_branch_loss(
+            [parent_attn],
+            [child_attn],
+            [parent_hidden],
+            [child_hidden],
+            indices,
+            indices,
+            "shared_attention",
+            1.0,
+            0.0,
+        )
+        feat_branch = _shared_branch_loss(
+            [parent_attn],
+            [child_attn],
+            [parent_hidden],
+            [child_hidden],
+            indices,
+            indices,
+            "shared_feature",
+            0.0,
+            1.0,
+        )
+
+        self.assertAlmostEqual(attn_branch.item(), attn_only.item(), places=5)
+        self.assertAlmostEqual(feat_branch.item(), feat_only.item(), places=5)
+        self.assertAlmostEqual(
+            combined.item(), attn_only.item() + feat_only.item(), places=5
+        )
+
+        scaled_attn = _shared_branch_loss(
+            [parent_attn],
+            [child_attn],
+            [parent_hidden],
+            [child_hidden],
+            indices,
+            indices,
+            "shared_attention",
+            0.5,
+            2.0,
+        )
+        self.assertAlmostEqual(
+            scaled_attn.item(), 0.5 * attn_only.item(), places=5
+        )
 
     def test_shared_attention_kl_is_per_head_and_per_query(self):
         parent = torch.tensor(

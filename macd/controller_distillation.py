@@ -13,6 +13,15 @@ from . import helper
 from .envs import make_vec_envs
 from .transformer.transformerPPOagent import PPOAgent, TransformerPPOAC
 
+DISTILL_LOSS_TYPES = (
+    "column_kl",
+    "shared_attention",
+    "shared_feature",
+    "shared_attention_feature",
+)
+SHARED_ATTENTION_LOSSES = ("shared_attention", "shared_attention_feature")
+SHARED_FEATURE_LOSSES = ("shared_feature", "shared_attention_feature")
+
 
 def same_voxel_mask(parent_robot, child_robot):
     parent_flat = np.asarray(parent_robot).reshape(-1)
@@ -156,16 +165,16 @@ def attention_distill_warmup(parent_controller, child_controller, observations,
                         net_name=net_name,
                         return_hidden_states=True,
                     )
-                    attention_loss = _shared_attention_kl(
-                        parent_attn, child_attn, parent_indices, child_indices
-                    )
-                    feature_loss = _shared_feature_loss(
-                        parent_hidden, child_hidden, parent_indices, child_indices
-                    )
-                    loss = (
-                        loss
-                        + lambda_attention * attention_loss
-                        + lambda_feature * feature_loss
+                    loss = loss + _shared_branch_loss(
+                        parent_attn,
+                        child_attn,
+                        parent_hidden,
+                        child_hidden,
+                        parent_indices,
+                        child_indices,
+                        loss_type,
+                        lambda_attention,
+                        lambda_feature,
                     )
 
             optimizer.zero_grad()  # 清空梯度。
@@ -324,8 +333,23 @@ def _kl_divergence(parent_scores, child_scores, eps=1e-8):
     return (parent_scores * (parent_scores.log() - child_scores.log())).sum(dim=-1).mean()
 
 
+def _shared_branch_loss(parent_attn, child_attn, parent_hidden, child_hidden,
+                        parent_indices, child_indices, loss_type,
+                        lambda_attention, lambda_feature):
+    loss = torch.zeros((), dtype=torch.float32)
+    if loss_type in SHARED_ATTENTION_LOSSES:
+        loss = loss + lambda_attention * _shared_attention_kl(
+            parent_attn, child_attn, parent_indices, child_indices
+        )
+    if loss_type in SHARED_FEATURE_LOSSES:
+        loss = loss + lambda_feature * _shared_feature_loss(
+            parent_hidden, child_hidden, parent_indices, child_indices
+        )
+    return loss
+
+
 def _validate_distillation_config(loss_type, lambda_attention, lambda_feature):
-    valid_loss_types = {"column_kl", "shared_attention_feature"}
+    valid_loss_types = set(DISTILL_LOSS_TYPES)
     if loss_type not in valid_loss_types:
         raise ValueError(
             "Unknown attention distillation loss {!r}; expected one of {}".format(

@@ -39,7 +39,6 @@ class transformerconfig:
 
         self.attention_layers=1
 
-        #column_kl
         self.attention_distill_loss = "shared_attention_feature"
 
         self.attention_distill_lambda_a = 1.0
