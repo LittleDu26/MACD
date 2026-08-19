@@ -32,7 +32,7 @@ from macd.ppo import PPO
 from macd.transformer.config import ppoconfig, transformerconfig
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-MAX_PARALLEL_LIMIT = 20
+MAX_PARALLEL_LIMIT = 40
 LOSS_ORDER = tuple(DISTILL_LOSS_TYPES)
 LOSS_LABELS = {
     "column_kl": "Column KL",
@@ -87,7 +87,7 @@ def parse_args():
         "--max-parallel",
         type=int,
         default=0,
-        help="Concurrent worker processes; 0 auto-detects (maximum 20).",
+        help="Concurrent worker processes; 0 auto-detects (maximum 40).",
     )
     parser.add_argument(
         "--torch-threads",

@@ -115,8 +115,8 @@ class ResourceSchedulingTest(unittest.TestCase):
     def test_auto_resource_resolution_for_current_machine_shape(self):
         self.assertEqual(runner.resolve_resource_config(0, 0, 12), (10, 1))
 
-    def test_twenty_explicit_workers_are_supported(self):
-        self.assertEqual(runner.resolve_resource_config(20, 1, 32), (20, 1))
+    def test_forty_explicit_workers_are_supported(self):
+        self.assertEqual(runner.resolve_resource_config(40, 1, 64), (40, 1))
 
     def test_explicit_resource_values_override_auto_mode(self):
         self.assertEqual(runner.resolve_resource_config(4, 2, 12), (4, 2))
