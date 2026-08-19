@@ -1,10 +1,9 @@
-"""Batch runner for the attention-loss ablation: 5 offspring x 4 loss values.
+"""Batch runner for a morphology-stratified attention-loss ablation.
 
 Each task inherits the most similar parent's controller, warms it up with one
 of the four attention_distill_loss values, then trains PPO for `updates`
-iterations and records a learning curve. Tasks run in spawn subprocesses with
-at most `--max-parallel` concurrent workers, submitted in strict offspring
-waves (2 offspring, then 2, then 1), so iteration 1 uses 8, then 8, then 4.
+iterations and records a learning curve. Tasks run in spawn subprocesses and
+are grouped into offspring waves sized from the resolved process count.
 """
 
 import argparse
@@ -33,6 +32,7 @@ from macd.ppo import PPO
 from macd.transformer.config import ppoconfig, transformerconfig
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+MAX_PARALLEL_LIMIT = 20
 LOSS_ORDER = tuple(DISTILL_LOSS_TYPES)
 LOSS_LABELS = {
     "column_kl": "Column KL",
@@ -53,18 +53,28 @@ CURVE_FIELDS = (
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Run the 5-offspring x 4-loss attention distillation ablation."
+        description="Run the stratified attention-loss distillation ablation."
     )
     parser.add_argument(
         "--offspring-dir",
-        default=os.path.join(ROOT_DIR, "result", "attention_loss_ablation", "offspring"),
+        default=os.path.join(
+            ROOT_DIR,
+            "result",
+            "attention_loss_ablation_stratified_20",
+            "offspring",
+        ),
     )
     parser.add_argument(
         "--results-dir",
-        default=os.path.join(ROOT_DIR, "result", "attention_loss_ablation", "results"),
+        default=os.path.join(
+            ROOT_DIR,
+            "result",
+            "attention_loss_ablation_stratified_20",
+            "results",
+        ),
     )
     parser.add_argument("--env", default="Walker-v0")
-    parser.add_argument("--updates", type=int, default=500)
+    parser.add_argument("--updates", type=int, default=200)
     parser.add_argument("--eval-interval", type=int, default=5)
     parser.add_argument("--num-evals", type=int, default=2)
     parser.add_argument(
@@ -73,8 +83,18 @@ def parse_args():
         default=2000,
         help="Offspring i uses training seed seed_base + i for all 4 losses.",
     )
-    parser.add_argument("--max-parallel", type=int, default=8)
-    parser.add_argument("--torch-threads", type=int, default=1)
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=0,
+        help="Concurrent worker processes; 0 auto-detects (maximum 20).",
+    )
+    parser.add_argument(
+        "--torch-threads",
+        type=int,
+        default=0,
+        help="Torch/OMP threads per worker; 0 auto-detects.",
+    )
     parser.add_argument(
         "--offspring-ids",
         type=int,
@@ -105,10 +125,29 @@ def validate_args(args):
         raise ValueError("--updates must be divisible by --eval-interval")
     if args.num_evals <= 0:
         raise ValueError("--num-evals must be positive")
-    if not 1 <= args.max_parallel <= 8:
-        raise ValueError("--max-parallel must be between 1 and 8")
-    if args.torch_threads <= 0:
-        raise ValueError("--torch-threads must be positive")
+    if not 0 <= args.max_parallel <= MAX_PARALLEL_LIMIT:
+        raise ValueError(
+            "--max-parallel must be between 0 and {}".format(MAX_PARALLEL_LIMIT)
+        )
+    if args.torch_threads < 0:
+        raise ValueError("--torch-threads must be nonnegative")
+
+
+def resolve_resource_config(max_parallel, torch_threads, logical_cpus=None):
+    """Resolve process and per-process thread counts, reserving two CPUs."""
+    logical_cpus = logical_cpus or os.cpu_count() or 1
+    available_cpus = max(1, logical_cpus - 2)
+    resolved_parallel = (
+        min(MAX_PARALLEL_LIMIT, available_cpus)
+        if max_parallel == 0
+        else max_parallel
+    )
+    resolved_threads = (
+        max(1, available_cpus // resolved_parallel)
+        if torch_threads == 0
+        else torch_threads
+    )
+    return resolved_parallel, resolved_threads
 
 
 def discover_offspring(args):
@@ -135,6 +174,24 @@ def discover_offspring(args):
     return offspring
 
 
+def resolve_offspring_asset_path(offspring_dir, configured_path, filename):
+    """Resolve metadata paths after an experiment directory is relocated."""
+    candidates = []
+    if configured_path:
+        candidates.append(configured_path)
+        if not os.path.isabs(configured_path):
+            candidates.append(os.path.join(offspring_dir, configured_path))
+    candidates.append(os.path.join(offspring_dir, filename))
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    raise FileNotFoundError(
+        "Could not resolve {} from offspring directory {}".format(
+            filename, offspring_dir
+        )
+    )
+
+
 def train_ablation_task(
     offspring_dir, loss_name, task_dir, env, updates, eval_interval,
     num_evals, seed, torch_threads,
@@ -143,7 +200,13 @@ def train_ablation_task(
 
     Everything is built inside the worker so no PPOAgent is ever pickled.
     """
+    os.environ["OMP_NUM_THREADS"] = str(torch_threads)
+    os.environ["MKL_NUM_THREADS"] = str(torch_threads)
     torch.set_num_threads(torch_threads)
+    try:
+        torch.set_num_interop_threads(1)
+    except RuntimeError:
+        pass
     device = torch.device("cpu")
     try:
         roaa.register_legacy_checkpoint_aliases()
@@ -151,11 +214,20 @@ def train_ablation_task(
         os.makedirs(os.path.join(task_dir, "controllers"), exist_ok=True)
         with open(os.path.join(offspring_dir, "metadata.json")) as f:
             meta = json.load(f)
-        parent_body = roaa.load_parent_structure(meta["parent_body_path"])
-        parent_ctrl, parent_obs_rms = roaa.load_parent_controller(
-            meta["parent_controller_path"], device
+        parent_body_path = resolve_offspring_asset_path(
+            offspring_dir, meta.get("parent_body_path"), "parent_body.npz"
         )
-        child_body = roaa.load_parent_structure(meta["child_body_path"])
+        parent_controller_path = resolve_offspring_asset_path(
+            offspring_dir, meta.get("parent_controller_path"), "parent_controller.pt"
+        )
+        child_body_path = resolve_offspring_asset_path(
+            offspring_dir, meta.get("child_body_path"), "body.npz"
+        )
+        parent_body = roaa.load_parent_structure(parent_body_path)
+        parent_ctrl, parent_obs_rms = roaa.load_parent_controller(
+            parent_controller_path, device
+        )
+        child_body = roaa.load_parent_structure(child_body_path)
 
         sample_setting = roaa.get_sample_setting(env, child_body)
         trans = transformerconfig()
@@ -228,6 +300,9 @@ def train_ablation_task(
                 )
             )
         write_curve_csv(os.path.join(task_dir, "learning_curve.csv"), records)
+        stderr_path = os.path.join(task_dir, "stderr.log")
+        if os.path.exists(stderr_path):
+            os.remove(stderr_path)
         return records
     except Exception:
         os.makedirs(task_dir, exist_ok=True)
@@ -261,6 +336,19 @@ def read_curve_csv(path):
                 }
             )
     return records
+
+
+def curve_is_complete(path, updates, eval_interval):
+    expected = 1 + updates // eval_interval
+    try:
+        records = read_curve_csv(path)
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (
+        len(records) == expected
+        and records[0]["update"] == 0
+        and records[-1]["update"] == updates
+    )
 
 
 def plot_loss_curves(output_dir, records, metric, stem, ylabel, env_name):
@@ -308,6 +396,8 @@ def aggregate(offspring, args):
                     "direct_parent_id": meta["direct_parent_id"],
                     "most_similar_parent_id": meta["most_similar_parent_id"],
                     "similarity_count": meta["similarity_count"],
+                    "distance_bin": meta.get("distance_bin", ""),
+                    "changed_voxel_count": meta.get("changed_voxel_count", ""),
                 }
             )
             if records:
@@ -346,7 +436,8 @@ def aggregate(offspring, args):
             f,
             fieldnames=(
                 "offspring_index", "direct_parent_id", "most_similar_parent_id",
-                "similarity_count", "loss", "status", "points", "initial_return",
+                "similarity_count", "distance_bin", "changed_voxel_count",
+                "loss", "status", "points", "initial_return",
                 "final_return", "best_return", "peak_return",
             ),
         )
@@ -367,12 +458,23 @@ def main():
 
     offspring = discover_offspring(args)
     selected = sorted(offspring.keys())
-    waves = [selected[i:i + 2] for i in range(0, len(selected), 2)]
     losses = LOSS_ORDER if args.only_loss is None else (args.only_loss,)
+    resolved_parallel, resolved_threads = resolve_resource_config(
+        args.max_parallel, args.torch_threads
+    )
+    offspring_per_wave = max(1, resolved_parallel // len(losses))
+    waves = [
+        selected[index:index + offspring_per_wave]
+        for index in range(0, len(selected), offspring_per_wave)
+    ]
 
     config = vars(args).copy()
     config["loss_order"] = list(losses)
     config["selected_offspring"] = selected
+    config["logical_cpus"] = os.cpu_count() or 1
+    config["resolved_max_parallel"] = resolved_parallel
+    config["resolved_torch_threads"] = resolved_threads
+    config["offspring_per_wave"] = offspring_per_wave
     with open(os.path.join(args.results_dir, "config.json"), "w") as f:
         json.dump(config, f, indent=2)
 
@@ -394,14 +496,16 @@ def main():
                     args.results_dir, "offspring_{}".format(idx), loss
                 )
                 curve_path = os.path.join(task_dir, "learning_curve.csv")
-                if os.path.exists(curve_path) and not args.force:
-                    status[key] = status.get(key, "skipped")
+                if curve_is_complete(
+                    curve_path, args.updates, args.eval_interval
+                ) and not args.force:
+                    status[key] = "completed"
                     continue
                 status[key] = "pending"
                 tasks.append(
                     (
                         off_dir, loss, task_dir, args.env, args.updates,
-                        args.eval_interval, args.num_evals, seed, args.torch_threads,
+                        args.eval_interval, args.num_evals, seed, resolved_threads,
                     )
                 )
         wave_task_lists.append(tasks)
@@ -411,24 +515,29 @@ def main():
         print("No pending tasks; aggregating existing results only.")
     else:
         max_workers = min(
-            args.max_parallel, max(len(tasks) for tasks in wave_task_lists)
+            resolved_parallel, max(len(tasks) for tasks in wave_task_lists)
         )
         print(
-            "\nRunning {} tasks in {} waves with up to {} concurrent processes...".format(
-                total_tasks, len(waves), max_workers
+            "\nRunning {} tasks in {} waves with up to {} concurrent processes "
+            "and {} Torch thread(s) each...".format(
+                total_tasks, len(waves), max_workers, resolved_threads
             )
         )
         spawn_ctx = multiprocessing.get_context("spawn")
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_workers, mp_context=spawn_ctx
-        ) as executor:
-            for wave_index, tasks in enumerate(wave_task_lists):
-                if not tasks:
-                    continue
-                print(
-                    "\n=== Wave {}: {} tasks ===".format(wave_index + 1, len(tasks)),
-                    flush=True,
-                )
+        for wave_index, tasks in enumerate(wave_task_lists):
+            if not tasks:
+                continue
+            print(
+                "\n=== Wave {}: {} tasks ===".format(wave_index + 1, len(tasks)),
+                flush=True,
+            )
+            # EvoGym's native simulator does not reliably survive reuse across
+            # multiple large task waves. A fresh pool also releases model and
+            # simulator memory deterministically between offspring pairs.
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=min(resolved_parallel, len(tasks)),
+                mp_context=spawn_ctx,
+            ) as executor:
                 futures = {
                     executor.submit(train_ablation_task, *task): task for task in tasks
                 }
