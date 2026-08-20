@@ -21,6 +21,7 @@ DISTILL_LOSS_TYPES = (
 )
 SHARED_ATTENTION_LOSSES = ("shared_attention", "shared_attention_feature")
 SHARED_FEATURE_LOSSES = ("shared_feature", "shared_attention_feature")
+CONTROLLER_COPY_MODES = ("full_copy", "non_distill_copy")
 
 
 def same_voxel_mask(parent_robot, child_robot):
@@ -67,6 +68,41 @@ def build_child_controller(parent_controller, sample_setting, ppo_args, trans_ar
     return child
 
 
+def build_copied_child_controller(parent_controller, sample_setting, ppo_args,
+                                  trans_args, device, copy_mode):
+    """Build a child with either complete or non-distillation inheritance.
+
+    ``non_distill_copy`` preserves the child's random Q/K projections and
+    LayerNorm parameters while copying every other compatible parent value.
+    For PyTorch's combined QKV projections, only the Q/K slices stay random.
+    """
+    if copy_mode not in CONTROLLER_COPY_MODES:
+        raise ValueError(
+            "Unknown controller copy mode {!r}; expected one of {}".format(
+                copy_mode, sorted(CONTROLLER_COPY_MODES)
+            )
+        )
+
+    actor_critic = TransformerPPOAC(
+        modular_state_dim=sample_setting[0],
+        modular_action_dim=sample_setting[1],
+        sequence_size=sample_setting[3],
+        other_feature_size=sample_setting[2],
+        ppo_args=ppo_args,
+        trans_args=trans_args,
+        ac_type="transformer",
+        controller_type=getattr(trans_args, "controller_type", "original"),
+        device=device,
+    )
+    child = PPOAgent(actor_critic=actor_critic).to(device)
+    initial_state = copy.deepcopy(child.state_dict())
+    child.load_state_dict(copy.deepcopy(parent_controller.state_dict()))
+    child.to(device)
+    if copy_mode == "non_distill_copy":
+        _restore_distillation_parameters_from_initial(child, initial_state)
+    return child
+
+
 def _restore_qk_from_initial(child, initial_state):
     state = child.state_dict()
     for name, value in state.items():
@@ -80,6 +116,35 @@ def _restore_qk_from_initial(child, initial_state):
             value.copy_(initial_state[name])
         elif name.endswith("self_attn.k_proj.weight") or name.endswith("self_attn.k_proj.bias"):
             value.copy_(initial_state[name])
+
+
+def _restore_distillation_parameters_from_initial(child, initial_state):
+    state = child.state_dict()
+    for name, value in state.items():
+        if name.endswith("self_attn.in_proj_weight") or name.endswith(
+            "self_attn.in_proj_bias"
+        ):
+            embed_dim = value.shape[0] // 3
+            value[: 2 * embed_dim].copy_(initial_state[name][: 2 * embed_dim])
+        elif _is_separate_qk_parameter(name) or _is_layernorm_parameter(name):
+            value.copy_(initial_state[name])
+
+
+def _is_separate_qk_parameter(name):
+    return any(
+        name.endswith(suffix)
+        for suffix in (
+            "self_attn.q_proj.weight",
+            "self_attn.q_proj.bias",
+            "self_attn.k_proj.weight",
+            "self_attn.k_proj.bias",
+        )
+    )
+
+
+def _is_layernorm_parameter(name):
+    # Keep this aligned with _enable_qk_layernorm below.
+    return "norm" in name
 
 
 def collect_parent_rollout_obs(parent_controller, parent_robot, env_name, seed, device,
