@@ -1,0 +1,3 @@
+nohup env MAX_PARALLEL=20 TORCH_THREADS=1 \
+  bash run_controller_copy_distill_ablation.sh train \
+  > controller_copy_distill_ablation.log 2>&1 &
