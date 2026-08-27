@@ -74,7 +74,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.seed = 101
     args.target_size = 5
-    args.threads_num = 8
+    args.threads_num = 20
     args.pop_size = 20
     args.controller_type = "daab"
     args.mmse = True
