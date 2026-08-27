@@ -21,7 +21,9 @@ from macd.transformer.transformer import (
 class AttentionDistillationLossTest(unittest.TestCase):
     def test_default_config_uses_detailed_objective(self):
         config = transformerconfig()
-        self.assertEqual(config.attention_distill_loss, "shared_attention_feature")
+        self.assertEqual(
+            config.attention_distill_loss, "attention_kl_feature_mse"
+        )
         self.assertEqual(config.attention_distill_lambda_a, 1.0)
         self.assertEqual(config.attention_distill_lambda_h, 1.0)
 
@@ -29,7 +31,9 @@ class AttentionDistillationLossTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             _validate_distillation_config("unknown", 1.0, 1.0)
         with self.assertRaises(ValueError):
-            _validate_distillation_config("shared_attention_feature", -1.0, 1.0)
+            _validate_distillation_config(
+                "attention_kl_feature_mse", -1.0, 1.0
+            )
 
     def test_validate_accepts_all_four_loss_modes(self):
         for loss_type in DISTILL_LOSS_TYPES:
@@ -40,9 +44,9 @@ class AttentionDistillationLossTest(unittest.TestCase):
             set(DISTILL_LOSS_TYPES),
             {
                 "column_kl",
-                "shared_attention",
-                "shared_feature",
-                "shared_attention_feature",
+                "attention_kl",
+                "feature_mse",
+                "attention_kl_feature_mse",
             },
         )
 
@@ -84,7 +88,7 @@ class AttentionDistillationLossTest(unittest.TestCase):
             [child_hidden],
             indices,
             indices,
-            "shared_attention_feature",
+            "attention_kl_feature_mse",
             1.0,
             1.0,
         )
@@ -95,7 +99,7 @@ class AttentionDistillationLossTest(unittest.TestCase):
             [child_hidden],
             indices,
             indices,
-            "shared_attention",
+            "attention_kl",
             1.0,
             0.0,
         )
@@ -106,7 +110,7 @@ class AttentionDistillationLossTest(unittest.TestCase):
             [child_hidden],
             indices,
             indices,
-            "shared_feature",
+            "feature_mse",
             0.0,
             1.0,
         )
@@ -124,7 +128,7 @@ class AttentionDistillationLossTest(unittest.TestCase):
             [child_hidden],
             indices,
             indices,
-            "shared_attention",
+            "attention_kl",
             0.5,
             2.0,
         )

@@ -36,9 +36,9 @@ MAX_PARALLEL_LIMIT = 40
 LOSS_ORDER = tuple(DISTILL_LOSS_TYPES)
 LOSS_LABELS = {
     "column_kl": "Column KL",
-    "shared_attention": "Shared attention KL",
-    "shared_feature": "Shared feature MSE",
-    "shared_attention_feature": "Shared attention + feature",
+    "attention_kl": "Attention KL",
+    "feature_mse": "Feature MSE",
+    "attention_kl_feature_mse": "Attention KL + feature MSE",
 }
 CURVE_FIELDS = (
     "offspring_index",

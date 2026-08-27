@@ -54,7 +54,7 @@ ARM_COPY_MODES = {
     "random_init": "random_init",
 }
 DISTILL_ARM = "full_copy_distill"
-DISTILL_LOSS = "shared_attention_feature"
+DISTILL_LOSS = "attention_kl_feature_mse"
 CURVE_FIELDS = (
     "offspring_index",
     "arm",

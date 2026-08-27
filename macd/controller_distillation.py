@@ -15,12 +15,18 @@ from .transformer.transformerPPOagent import PPOAgent, TransformerPPOAC
 
 DISTILL_LOSS_TYPES = (
     "column_kl",
-    "shared_attention",
-    "shared_feature",
-    "shared_attention_feature",
+    "attention_kl",
+    "feature_mse",
+    "attention_kl_feature_mse",
 )
-SHARED_ATTENTION_LOSSES = ("shared_attention", "shared_attention_feature")
-SHARED_FEATURE_LOSSES = ("shared_feature", "shared_attention_feature")
+SHARED_ATTENTION_LOSSES = (
+    "attention_kl",
+    "attention_kl_feature_mse",
+)
+SHARED_FEATURE_LOSSES = (
+    "feature_mse",
+    "attention_kl_feature_mse",
+)
 CONTROLLER_COPY_MODES = ("full_copy", "non_distill_copy")
 
 
@@ -176,7 +182,7 @@ def attention_distill_warmup(parent_controller, child_controller, observations,
                              parent_robot, child_robot, device,
                              batch_size=64, warmup_epochs=2, lr_warm=5e-4,
                              gradient_clip=0.5,
-                             loss_type="shared_attention_feature",
+                             loss_type="attention_kl_feature_mse",
                              lambda_attention=1.0, lambda_feature=1.0,
                              lambda_col=1.0):
     _validate_distillation_config(loss_type, lambda_attention, lambda_feature)
@@ -281,7 +287,7 @@ def prepare_distilled_controller(agent, ppo_args, trans_args, sample_setting, ar
         agent.robot,
         device,
         loss_type=getattr(
-            trans_args, "attention_distill_loss", "shared_attention_feature"
+            trans_args, "attention_distill_loss", "attention_kl_feature_mse"
         ),
         lambda_attention=getattr(
             trans_args, "attention_distill_lambda_a", 1.0
