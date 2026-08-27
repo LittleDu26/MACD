@@ -57,7 +57,7 @@ if __name__ == "__main__":
     args.controller_type="daab"
     args.mmse = True
     args.distill = True
-    args.suffix='2loss'
+    args.suffix=''
     env_list= ["Walker-v0"]
     num=1
 
