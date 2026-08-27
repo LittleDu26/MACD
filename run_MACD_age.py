@@ -81,7 +81,7 @@ if __name__ == "__main__":
     args.distill = True
     args.suffix = ""
 
-    env_list = ["Walker-v0","Thrower-v0","GapJumper-v0"]
+    env_list = ["Walker-v0","Thrower-v0"]
     total_maturitys = [5,10,15,20,25,30,50]
     num = 1
 
