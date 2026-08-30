@@ -1,0 +1,15 @@
+ulimit -n 1048576
+nohup python run_MACD_age.py > age.log 2>&1 &
+
+ulimit -n 1048576
+
+nohup python run_MACD.py > macd.log 2>&1 &
+
+
+ps -ef | grep run_AGCD.py
+
+
+kill -TERM XXX
+pkill -9 -u $USER -f anaconda3/envs/EvoGym/bin/python
+
+pkill -f torch.multiprocessing

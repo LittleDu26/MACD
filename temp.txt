@@ -1,2 +1,0 @@
-ulimit -n 1048576
-nohup python run_MACD_age.py > age.log 2>&1 &
