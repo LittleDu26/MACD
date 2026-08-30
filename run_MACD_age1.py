@@ -32,13 +32,6 @@ if __name__ == "__main__":
         help="experiment name suffix, e.g. XX -> MACD(XX)",
     )
     parser.add_argument("--distill", action="store_true", help="")
-    parser.add_argument(
-        "--controller_type",
-        type=str,
-        default="daab",
-        choices=["original", "daab"],
-        help="controller architecture",
-    )
     parser.add_argument("--mmse", action="store_true", help="")
     parser.add_argument(
         "--promotion_k",
@@ -76,7 +69,6 @@ if __name__ == "__main__":
     args.target_size = 5
     args.threads_num = 20
     args.pop_size = 20
-    args.controller_type = "daab"
     args.mmse = True
     args.distill = True
     args.suffix = ""

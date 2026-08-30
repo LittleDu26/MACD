@@ -12,7 +12,12 @@ import csv
 import json
 import multiprocessing
 import os
+import sys
 import traceback
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 import matplotlib
 
@@ -21,7 +26,7 @@ import matplotlib.pyplot as plt
 import torch
 from evogym import get_full_connectivity
 
-import run_offspring_attention_ablation as roaa
+import tests.run_offspring_attention_ablation as roaa
 from macd.controller_distillation import (
     DISTILL_LOSS_TYPES,
     attention_distill_warmup,
@@ -31,7 +36,7 @@ from macd.controller_distillation import (
 from macd.ppo import PPO
 from macd.transformer.config import ppoconfig, transformerconfig
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = PROJECT_ROOT
 MAX_PARALLEL_LIMIT = 40
 LOSS_ORDER = tuple(DISTILL_LOSS_TYPES)
 LOSS_LABELS = {

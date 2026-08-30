@@ -12,15 +12,20 @@ import os
 import random
 import re
 import shutil
+import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 import numpy as np
 from evogym import get_full_connectivity, has_actuator, hashable, is_connected
 
-import run_offspring_attention_ablation as roaa
+import tests.run_offspring_attention_ablation as roaa
 from macd.controller_distillation import same_voxel_mask, should_skip_warmup
 from utils.algo_utils import mutate
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = PROJECT_ROOT
 
 GEN_RE = re.compile(r"Running generation (\d+)")
 SURV_RE = re.compile(r"survivor IDs\(\d+\):\[([^\]]+)\]")

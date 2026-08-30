@@ -7,7 +7,7 @@ class transformerconfig:
 
         self.condition_decoder=False
 
-        self.controller_type = "original"
+        self.controller_type = "daab"
 
         self.daab_observation_encoder_mode = "full_obs"
 

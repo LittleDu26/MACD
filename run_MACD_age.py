@@ -32,13 +32,6 @@ if __name__ == "__main__":
         help="experiment name suffix, e.g. XX -> MACD(XX)",
     )
     parser.add_argument("--distill", action="store_true", help="")
-    parser.add_argument(
-        "--controller_type",
-        type=str,
-        default="daab",
-        choices=["original", "daab"],
-        help="controller architecture",
-    )
     parser.add_argument("--mmse", action="store_true", help="")
     parser.add_argument(
         "--promotion_k",
@@ -74,15 +67,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.seed = 101
     args.target_size = 5
-    args.threads_num = 20
+    args.threads_num = 8
     args.pop_size = 20
-    args.controller_type = "daab"
     args.mmse = True
     args.distill = True
     args.suffix = ""
 
     env_list = ["Walker-v0","Thrower-v0"]
-    total_maturitys = [5,10,15,20,25,30,50]
+    # total_maturitys = [5,10,15,20,25,30,50]
+    total_maturitys = [25,30,50]
     num = 1
 
     for total_maturity in total_maturitys:

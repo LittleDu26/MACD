@@ -18,6 +18,10 @@ import os
 import random
 import sys
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -42,7 +46,7 @@ from macd.transformer.transformerPPOagent import PPOAgent, TransformerPPOAC
 from utils.algo_utils import mutate
 
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = PROJECT_ROOT
 ARM_ORDER = (
     "random_init",
     "distill_only",
