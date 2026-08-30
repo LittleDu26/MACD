@@ -8,18 +8,19 @@ import tempfile
 from typing import Any, List
 
 
-def job_wrapper(func, args, result_path):
+def job_wrapper(input_path, result_path):
     """
-    子进程执行的包装函数，将结果对象写入独立文件。
+    子进程执行的包装函数，从独立文件读取任务并将结果写入独立文件。
 
-    不通过 Manager().list() 返回 Torch 模型/张量对象。Manager 代理在反序列化
-    Torch storage 时会走共享内存 mmap，长时间并行训练后容易触发 Cannot allocate
-    memory。
+    使用 spawn 时，若直接把含 Tensor 的 ``args`` 传给 Process，PyTorch 会在
+    ``Process.start()`` 期间为 storage 创建共享内存对象，容易耗尽文件描述符。
+    因此 Process 的参数只传两个普通路径，任务对象在子进程启动后才从文件加载。
     """
     try:
+        func, args = torch.load(input_path, map_location="cpu")
         out_value = func(*args)
     except Exception:
-        print("ERROR\n")
+        print("ERROR running multiprocessing job\n")
         traceback.print_exc()
         print()
         out_value = None
@@ -36,15 +37,22 @@ class Group():
 
     def __init__(self):
         self.jobs = []
+        self.input_paths = []
         self.return_paths = []
         self.result_dir = tempfile.mkdtemp(prefix="agcd_mp_results_")
         self.callback = []
 
     def add_job(self, func, args, callback=None):
         ctx = mp.get_context("spawn")
-        result_path = os.path.join(self.result_dir, "{}.pt".format(len(self.jobs)))
+        job_index = len(self.jobs)
+        input_path = os.path.join(self.result_dir, "{}_input.pt".format(job_index))
+        result_path = os.path.join(self.result_dir, "{}_result.pt".format(job_index))
+        # Serialize tensors before starting the process.  Passing ``args`` directly
+        # to ctx.Process would invoke torch.multiprocessing shared-memory reduction.
+        torch.save((func, args), input_path)
+        self.input_paths.append(input_path)
         self.return_paths.append(result_path)
-        self.jobs.append(ctx.Process(target=job_wrapper, args=(func, args, result_path)))
+        self.jobs.append(ctx.Process(target=job_wrapper, args=(input_path, result_path)))
         if callback is not None:
             self.callback.append(callback)
 
