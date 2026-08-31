@@ -74,7 +74,7 @@ if __name__ == "__main__":
     args.suffix = ""
     env_list = ["Walker-v0","Thrower-v0"]
     # total_maturitys = [5,10,15,20,25,30,50]
-    total_maturitys = [25,30,50]
+    total_maturitys = [25,50]
     num = 1
 
     for total_maturity in total_maturitys:
