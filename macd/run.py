@@ -36,7 +36,7 @@ def single_agent_fit(agent, ppo_args, trans_args, sample_setting, args):
             actor_critic = TransformerPPOAC(modular_state_dim=sample_setting[0], modular_action_dim=sample_setting[1],
                                             sequence_size=sample_setting[3], other_feature_size=sample_setting[2],
                                             ppo_args=ppo_args, trans_args=trans_args, ac_type="transformer",
-                                            controller_type=args.controller_type, device=device)
+                                            controller_type=trans_args.controller_type, device=device)
             # ppoagent
             ppoAgent = PPOAgent(actor_critic=actor_critic)
         agent.controller = ppoAgent
@@ -269,15 +269,13 @@ def run(args):
 
     trans_args = transformerconfig()
     ppo_args = ppoconfig()
-    trans_args.controller_type = args.controller_type
-    if args.controller_type == "daab":
+    if trans_args.controller_type == "daab":
         trans_args.attention_heads = trans_args.daab_attention_heads
         trans_args.condition_decoder = True
     else:
         # CuCo's reordered modular observation contains 9 features per token,
         # so the old 4/4 axis split is no longer dimensionally valid.
         trans_args.use_separate_pos_embedding = False
-    ppo_args.controller_type = args.controller_type
     ppo_args.env_name = args.env
     ppo_args.seed = args.seed
     ppo_args.eval_interval = args.total_step // 100

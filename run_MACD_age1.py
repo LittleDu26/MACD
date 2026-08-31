@@ -72,7 +72,6 @@ if __name__ == "__main__":
     args.mmse = True
     args.distill = True
     args.suffix = ""
-
     env_list = ["GapJumper-v0"]
     total_maturitys = [5,10,15,20,25,30,50]
     num = 1
