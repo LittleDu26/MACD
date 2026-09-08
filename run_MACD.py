@@ -20,11 +20,9 @@ if __name__ == "__main__":
                         help='')
     parser.add_argument('--pop_size', type=int, default=20,
                         help='')
-    parser.add_argument('--train_iters', type=int, default=40,
+    parser.add_argument('--train_iters', type=int, default=64,
                         help='')
     parser.add_argument('--total_step', type=int, default=1000,
-                        help='')
-    parser.add_argument('--total_maturity', type=int, default=25,
                         help='')
     parser.add_argument('--save_to', type=str, default='',
                         help='save_to')
@@ -50,7 +48,6 @@ if __name__ == "__main__":
     args.target_size = 5
     args.threads_num = 8
     args.pop_size = 20
-    args.total_maturity = 25
     args.mmse = True
     args.distill = True
     args.suffix=''
@@ -60,9 +57,9 @@ if __name__ == "__main__":
     for env in env_list:
         max_eva, tc = get_par(env)
         args.env=env
-        args.train_iters = int(tc//args.total_maturity)
         args.total_step=tc
         args.max_iters=max_eva*tc
+        args.max_maturity_stage = (tc + args.train_iters - 1) // args.train_iters
         temp_save_to=os.path.join(root_dir, "result","MACD")
         if not args.mmse:
             temp_save_to += "_noM"

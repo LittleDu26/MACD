@@ -18,7 +18,27 @@ import json
 import numpy as np
 
 
-def single_agent_fit(agent, ppo_args, trans_args, sample_setting, args):
+def _max_maturity_stage(total_step, train_iters):
+    """Return the number of maturity stages needed to consume ``total_step``."""
+    if total_step <= 0:
+        raise ValueError("total_step must be positive")
+    if train_iters <= 0:
+        raise ValueError("train_iters must be positive")
+    return (int(total_step) + int(train_iters) - 1) // int(train_iters)
+
+
+def _allocated_stage_iters(agent_iteration, total_step, train_iters,
+                           current_iters, max_iters):
+    """Compute a stage length without exceeding either training budget."""
+    if train_iters <= 0:
+        raise ValueError("train_iters must be positive")
+    agent_remaining = max(0, int(total_step) - int(agent_iteration))
+    global_remaining = max(0, int(max_iters) - int(current_iters))
+    return min(int(train_iters), agent_remaining, global_remaining)
+
+
+def single_agent_fit(agent, ppo_args, trans_args, sample_setting, args,
+                     stage_iters):
     # Seed
     device = torch.device("cpu")
     torch.set_num_threads(1)
@@ -44,7 +64,12 @@ def single_agent_fit(agent, ppo_args, trans_args, sample_setting, args):
     ppoAgent.ac.to(device)
 
     # PPO
-    ppo = PPO(robot=robot, ppo_size=1, train_iters=args.train_iters, agent=ppoAgent, verbose=True,
+    # Each stage may be shorter than the configured stage length (the final
+    # maturity or the final global-budget allocation).  Keep this override
+    # local to the worker so parallel jobs cannot affect one another.
+    ppo_args = copy.deepcopy(ppo_args)
+    ppo_args.eval_interval = stage_iters
+    ppo = PPO(robot=robot, ppo_size=1, train_iters=stage_iters, agent=ppoAgent, verbose=True,
               ppo_args=ppo_args, total_step=args.total_step, save_path=args.save_to, device=device,
               mmse=args.mmse)
 
@@ -60,7 +85,7 @@ def single_agent_fit(agent, ppo_args, trans_args, sample_setting, args):
     agent.history_fitness += reward_history
     agent.maturity += len(reward_history)
     if not args.mmse:
-        agent.maturity = args.total_maturity
+        agent.maturity = _max_maturity_stage(args.total_step, args.train_iters)
     # ppoAgent.ac.to("cpu")
     return agent
 
@@ -79,13 +104,17 @@ def muti_running(agents, ppo_args, trans_args, sample_setting, args):
         if agent.finished:
             maturity_agents.append(agent)
         else:
-            if current_iters >= args.max_iters:
+            stage_iters = _allocated_stage_iters(
+                agent.iteration,
+                args.total_step,
+                args.train_iters,
+                current_iters,
+                args.max_iters,
+            )
+            if stage_iters <= 0:
                 break
-            if args.mmse:
-                current_iters += args.train_iters
-            else:
-                current_iters += args.total_step
-            all_args = (agent, ppo_args, trans_args, sample_setting, args)
+            current_iters += stage_iters
+            all_args = (agent, ppo_args, trans_args, sample_setting, args, stage_iters)
             group.add_job(single_agent_fit, all_args)
             robot = (agent.robot, get_full_connectivity(agent.robot))
             temp_path_body = os.path.join(args.save_to, "structures", str(agent.id))
@@ -137,7 +166,7 @@ def _last_training_delta(agent):
     return 0.0
 
 
-def add_history_records(historical_archive, agent, generation, total_maturity):
+def add_history_records(historical_archive, agent, generation, max_maturity_stage):
     history_len = len(agent.history_fitness)
     archived_len = getattr(agent, "archived_history_len", 0)
     if history_len <= archived_len:
@@ -156,7 +185,7 @@ def add_history_records(historical_archive, agent, generation, total_maturity):
         else:
             previous_fitness = agent.history_fitness[history_index - 1]
 
-        if maturity >= total_maturity:
+        if maturity >= max_maturity_stage:
             status = "final"
         elif maturity < agent.maturity:
             status = "promoted"
@@ -178,8 +207,8 @@ def add_history_records(historical_archive, agent, generation, total_maturity):
     return new_records
 
 
-def add_history_record(historical_archive, agent, generation, total_maturity):
-    records = add_history_records(historical_archive, agent, generation, total_maturity)
+def add_history_record(historical_archive, agent, generation, max_maturity_stage):
+    records = add_history_records(historical_archive, agent, generation, max_maturity_stage)
     return records[-1] if records else None
 
 
@@ -218,12 +247,12 @@ def _score_maturity_layer(records, lambda_max, lambda_min, lambda_tau, eps,
     return scores, np.array(values, dtype=float)
 
 
-def select_survivors(population, historical_archive, total_maturity,
+def select_survivors(population, historical_archive, max_maturity_stage,
                      promotion_k=10, lambda_max=0.30, lambda_min=0.05,
-                     lambda_tau=2.0, eps=1e-8, max_maturity_stage=25):
+                     lambda_tau=2.0, eps=1e-8):
     active_agents = [
         agent for agent in population
-        if not agent.finished and agent.maturity < total_maturity
+        if not agent.finished and agent.maturity < max_maturity_stage
     ]
     if not active_agents or promotion_k <= 0:
         return []
@@ -263,6 +292,8 @@ def run(args):
     global current_iters
     mlp.set_start_method('spawn', force=True)
 
+    max_maturity_stage = _max_maturity_stage(args.total_step, args.train_iters)
+
     logger = CustomReporter(args.save_to)
 
     csv_file = open(args.save_to + "/table.csv", "w")
@@ -280,7 +311,9 @@ def run(args):
         trans_args.use_separate_pos_embedding = False
     ppo_args.env_name = args.env
     ppo_args.seed = args.seed
-    ppo_args.eval_interval = args.total_step // 100
+    # The worker sets this again to its actual stage length.  Keeping a valid
+    # default here also protects callers that inspect the PPO config directly.
+    ppo_args.eval_interval = args.train_iters
 
     # 检查机器人
     structure_shape = (args.target_size, args.target_size)
@@ -324,18 +357,18 @@ def run(args):
                 all_agents[agent.id] = agent
                 if args.mmse:
                     fitness_window.append(agent)
-                    if len(fitness_window) == args.total_maturity:
+                    if len(fitness_window) == max_maturity_stage:
                         best_agent = get_best_agent(fitness_window)
                         csv_content = {"id": best_agent.id, "maturity": best_agent.maturity, "fit": best_agent.fitness}
                         csv_logger.writerow(csv_content)
                         csv_file.flush()
                         fitness_window = []
-                    add_history_records(historical_archive, agent, generation, args.total_maturity)
+                    add_history_records(historical_archive, agent, generation, max_maturity_stage)
                 else:
                     csv_content = {"id": agent.id, "maturity": agent.maturity, "fit": agent.fitness}
                     csv_logger.writerow(csv_content)
                     csv_file.flush()
-                if agent.maturity >= args.total_maturity:
+                if agent.iteration >= args.total_step:
                     agent.finished = True
 
         pop_agent.sort(key=lambda agent: agent.fitness, reverse=True)
@@ -347,13 +380,12 @@ def run(args):
             Survivors = select_survivors(
                 pop_agent,
                 historical_archive,
-                args.total_maturity,
+                max_maturity_stage,
                 promotion_k=args.pop_size//2,
                 lambda_max=getattr(args, "lambda_max", 0.30),
                 lambda_min=getattr(args, "lambda_min", 0.05),
                 lambda_tau=getattr(args, "lambda_tau", 2.0),
                 eps=getattr(args, "selection_eps", 1e-8),
-                max_maturity_stage=args.total_maturity,
             )
             mark_promoted_history(historical_archive, Survivors)
         else:
@@ -363,7 +395,7 @@ def run(args):
         if args.mmse:
             final_candidates = [
                 agent for agent in all_agents.values()
-                if agent.maturity >= args.total_maturity
+                if agent.iteration >= args.total_step
             ]
             final_candidates.sort(key=lambda agent: agent.fitness, reverse=True)
             final_candidates = final_candidates[:max(1, len(final_candidates)//2)]

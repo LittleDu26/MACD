@@ -20,7 +20,9 @@ class PPO:
         self.agent = agent
         self.ppo_size = ppo_size
         self.robots = []
-        self.train_iters = train_iters
+        self.train_iters = int(train_iters)
+        if self.train_iters <= 0:
+            raise ValueError("train_iters must be positive")
         self.robots_tuple = robot
         self.optimizer = optim.Adam(self.agent.parameters(), lr=self.args.lr, eps=self.args.EPS)
         self.robots = []
@@ -31,7 +33,9 @@ class PPO:
         if self.mmse:
             self.total_step = self.train_iters
         else:
-            self.total_step = total_step
+            self.total_step = int(total_step)
+        if self.total_step <= 0:
+            raise ValueError("total_step must be positive")
             
         self.device =device
         # Logger
@@ -85,7 +89,11 @@ class PPO:
 
         reward_history=[]
         max_fitness = start_fitness
-        for i,j in enumerate(range(num_updates*4)[iteration:]):
+        # ``total_step`` is the exact number of updates assigned to this
+        # worker for the current maturity stage.  In particular, the final
+        # stage may be shorter than the configured 64 updates.
+        for i in range(self.total_step):
+            j = iteration + i
             if self.args.use_linear_lr_decay:
                 # decrease learning rate linearly
                 helper.update_linear_schedule(self.optimizer, j, num_updates*4,self.args.lr)
