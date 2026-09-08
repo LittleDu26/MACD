@@ -12,7 +12,6 @@ if __name__ == '__main__':
     num=1
     random.seed(seed)
     np.random.seed(seed)
-    seed=101
     for i in range(len(tasks)):
         env_name = tasks[i]
         max_eva, tc = get_par(env_name)

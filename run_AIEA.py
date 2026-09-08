@@ -1,12 +1,16 @@
 from utils.MyUtils import get_par
 from SAEA.AIEA import run_aiea
 import os
+import random
+import numpy as np
 root_dir = os.path.dirname(os.path.abspath(__file__))
 if __name__ == "__main__":
 
     tasks=["Walker-v0"]
     num=1
     seed=101
+    random.seed(seed)
+    np.random.seed(seed)
     for i in range(len(tasks)):
         env_name = tasks[i]
         max_eva, tc = get_par(env_name)
