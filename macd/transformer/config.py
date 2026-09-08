@@ -39,6 +39,7 @@ class transformerconfig:
 
         self.attention_layers=1
 
+        #loss=lambda_a * attention_kl + lambda_h * feature_mse
         self.attention_distill_loss = "attention_kl_feature_mse"
 
         self.attention_distill_lambda_a = 1.0
@@ -51,7 +52,7 @@ class transformerconfig:
 
 class ppoconfig:
     def __init__(self) -> None:
-        self.ori_log_dir = '/tmp/modularevogym/'
+        self.ori_log_dir = '/tmp/'
 
         self.num_env_steps=10e6
 
