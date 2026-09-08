@@ -1,12 +1,16 @@
 from utils.MyUtils import get_par
 from bo.run import run_bo
 import os
+import random
+import numpy as np
 root_dir = os.path.dirname(os.path.abspath(__file__))
 
 if __name__ == '__main__':
 
     tasks=["Walker-v0"]
     seed=101
+    random.seed(seed)
+    np.random.seed(seed)
     num=1
     for i in range(len(tasks)):
         env_name = tasks[i]

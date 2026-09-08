@@ -1,6 +1,8 @@
 import os
 from utils.MyUtils import get_par
 from cppn_neat.run import run_cppn_neat
+import random
+import numpy as np
 root_dir = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -8,6 +10,8 @@ if __name__ == '__main__':
     seed = 101
     tasks=["Walker-v0"]
     num=1
+    random.seed(seed)
+    np.random.seed(seed)
     seed=101
     for i in range(len(tasks)):
         env_name = tasks[i]

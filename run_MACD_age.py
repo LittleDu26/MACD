@@ -72,9 +72,8 @@ if __name__ == "__main__":
     args.mmse = True
     args.distill = True
     args.suffix = ""
-    env_list = ["Walker-v0","Thrower-v0"]
-    # total_maturitys = [5,10,15,20,25,30,50]
-    total_maturitys = [25,50]
+    env_list = ["Thrower-v0"]
+    total_maturitys = [5,10,20,25,50]
     num = 1
 
     for total_maturity in total_maturitys:

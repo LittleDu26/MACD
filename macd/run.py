@@ -258,6 +258,8 @@ def select_survivors(population, historical_archive, total_maturity,
 
 
 def run(args):
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     global current_iters
     mlp.set_start_method('spawn', force=True)
 

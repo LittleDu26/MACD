@@ -6,7 +6,7 @@ ulimit -n 1048576
 nohup python run_MACD.py > macd.log 2>&1 &
 
 
-ps -ef | grep run_AGCD.py
+ps -ef | grep run_MACD.py
 
 
 kill -TERM XXX
