@@ -19,7 +19,7 @@ import numpy as np
 
 ROOT = Path("result/MACD_age")
 OUT = ROOT / "analysis"
-TOTAL_MATURITIES = [5, 10, 15, 20, 25, 50]
+TOTAL_MATURITIES = [5, 10, 20, 25, 50]
 ENVS = ["Walker-v0", "Thrower-v0"]
 
 # High-contrast, color-blind-friendly categorical palette.  The previous
@@ -28,7 +28,6 @@ ENVS = ["Walker-v0", "Thrower-v0"]
 MATURITY_COLORS = {
     5: "#0072B2",   # blue
     10: "#E69F00",  # orange
-    15: "#009E73",  # green
     20: "#D55E00",  # vermillion
     25: "#CC79A7",  # purple/pink
     50: "#56B4E9",  # sky blue
@@ -36,12 +35,11 @@ MATURITY_COLORS = {
 MATURITY_LINESTYLES = {
     5: "-",
     10: "--",
-    15: "-.",
     20: ":",
     25: (0, (5, 1)),
     50: (0, (3, 1, 1, 1)),
 }
-MATURITY_MARKERS = {5: "o", 10: "s", 15: "^", 20: "D", 25: "P", 50: "X"}
+MATURITY_MARKERS = {5: "o", 10: "s", 20: "D", 25: "P", 50: "X"}
 
 GEN_RE = re.compile(r"Running generation\s+(\d+)")
 BEST_RE = re.compile(

@@ -1,3 +1,5 @@
+！！！很重要，记得看args.threads_num，服务器可以20线程
+
 ulimit -n 1048576
 nohup python run_MACD_age.py > age.log 2>&1 &
 
