@@ -48,6 +48,7 @@ if __name__ == "__main__":
     args.target_size = 5
     args.threads_num = 8
     args.pop_size = 20
+    args.train_iters=64
     args.mmse = True
     args.distill = True
     args.suffix=''
@@ -59,7 +60,6 @@ if __name__ == "__main__":
         args.env=env
         args.total_step=tc
         args.max_iters=max_eva*tc
-        args.max_maturity_stage = (tc + args.train_iters - 1) // args.train_iters
         temp_save_to=os.path.join(root_dir, "result","MACD")
         if not args.mmse:
             temp_save_to += "_noM"
