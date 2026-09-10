@@ -65,10 +65,10 @@ def single_agent_fit(agent, ppo_args, trans_args, sample_setting, args,
 
     # PPO
     # Each stage may be shorter than the configured stage length (the final
-    # maturity or the final global-budget allocation).  Keep this override
-    # local to the worker so parallel jobs cannot affect one another.
+    # maturity or the final global-budget allocation).  Copy the PPO config
+    # for worker isolation, while retaining the experiment-wide evaluation
+    # interval configured in ``run``.
     ppo_args = copy.deepcopy(ppo_args)
-    ppo_args.eval_interval = stage_iters
     ppo = PPO(robot=robot, ppo_size=1, train_iters=stage_iters, agent=ppoAgent, verbose=True,
               ppo_args=ppo_args, total_step=args.total_step, save_path=args.save_to, device=device,
               mmse=args.mmse)
@@ -84,6 +84,7 @@ def single_agent_fit(agent, ppo_args, trans_args, sample_setting, args,
 
     agent.history_fitness += reward_history
     agent.maturity += len(reward_history)
+    agent.last_stage_iters = stage_iters
     if not args.mmse:
         agent.maturity = _max_maturity_stage(args.total_step, args.train_iters)
     # ppoAgent.ac.to("cpu")
@@ -287,8 +288,6 @@ def select_survivors(population, historical_archive, max_maturity_stage,
 
 
 def run(args):
-    random.seed(args.seed)
-    np.random.seed(args.seed)
     global current_iters
     mlp.set_start_method('spawn', force=True)
 
@@ -311,9 +310,7 @@ def run(args):
         trans_args.use_separate_pos_embedding = False
     ppo_args.env_name = args.env
     ppo_args.seed = args.seed
-    # The worker sets this again to its actual stage length.  Keeping a valid
-    # default here also protects callers that inspect the PPO config directly.
-    ppo_args.eval_interval = args.train_iters
+    ppo_args.eval_interval = max(1, args.total_step // 100)
 
     # 检查机器人
     structure_shape = (args.target_size, args.target_size)
@@ -327,6 +324,7 @@ def run(args):
     generation = 0
     current_iters = 0
     fitness_window = []
+    fitness_window_iters = 0
 
     # Set dimensions
     robots = sample_robot(structure_shape)
@@ -357,12 +355,16 @@ def run(args):
                 all_agents[agent.id] = agent
                 if args.mmse:
                     fitness_window.append(agent)
-                    if len(fitness_window) == max_maturity_stage:
+                    fitness_window_iters += agent.last_stage_iters
+                    while fitness_window_iters >= args.total_step:
                         best_agent = get_best_agent(fitness_window)
                         csv_content = {"id": best_agent.id, "maturity": best_agent.maturity, "fit": best_agent.fitness}
                         csv_logger.writerow(csv_content)
                         csv_file.flush()
-                        fitness_window = []
+                        fitness_window_iters -= args.total_step
+                        # The stage that crosses a budget boundary contributes
+                        # its remaining updates to the next budget window.
+                        fitness_window = [agent] if fitness_window_iters else []
                     add_history_records(historical_archive, agent, generation, max_maturity_stage)
                 else:
                     csv_content = {"id": agent.id, "maturity": agent.maturity, "fit": agent.fitness}

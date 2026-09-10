@@ -52,10 +52,11 @@ if __name__ == "__main__":
     args.mmse = True
     args.distill = True
     args.suffix=''
+    # env_list =["PlatformJumper-v0",
+    #             "BridgeWalker-v0",
+    #             "DownStepper-v0",
+    #             "Hurdler-v0"]
     env_list = ["Walker-v0"]
-    # env_list = ["Walker-v0","AreaMaximizer-v0","Carrier-v0",
-    #             "Thrower-v0","UpStepper-v0","ObstacleTraverser-v0",
-    #             "ObstacleTraverser-v1","GapJumper-v0","BeamSlider-v0"]
     num=1
 
     for env in env_list:
@@ -63,7 +64,7 @@ if __name__ == "__main__":
         args.env=env
         args.total_step=tc
         args.max_iters=max_eva*tc
-        temp_save_to=os.path.join(root_dir, "result","MACD")
+        temp_save_to=os.path.join(root_dir, "result1","MACD")
         if not args.mmse:
             temp_save_to += "_noM"
         if not args.distill:

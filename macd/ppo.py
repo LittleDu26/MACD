@@ -121,7 +121,11 @@ class PPO:
             # print("Begin training!!!!!")
             self.train_on_batch()
 
-            if (i+1) % self.args.eval_interval == 0:
+            # Evaluate on the experiment-wide interval and once at the end of
+            # every allocated maturity stage.  A single condition prevents a
+            # duplicate evaluation when the stage endpoint is interval-aligned.
+            if ((i + 1) % self.args.eval_interval == 0
+                    or (i + 1) == self.total_step):
                 # Evaluation
                 obs_rmss = helper.get_vec_normalize(self.envs).ob_rms
                 fitness = evaluate(num_evals=self.args.num_evals, uni_agent=self.agent, ob_rms=obs_rmss,

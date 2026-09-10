@@ -1,4 +1,4 @@
-result/
+result*/
 *.log
 evogym/simulator_cpp.cpython-37m-x86_64-linux-gnu.so
 
