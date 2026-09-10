@@ -9,13 +9,43 @@ from .transformer.config import transformerconfig, ppoconfig
 import gym
 from .transformer.transformerPPOagent import PPOAgent, TransformerPPOAC
 from .ppo import PPO
-from .controller_distillation import prepare_distilled_controller
+from .controller_distillation import (
+    build_copied_child_controller,
+    prepare_distilled_controller,
+)
 import copy
 import torch.multiprocessing as mlp
 import evogym.envs
 import utils.my_mp_group as mp
 import json
 import numpy as np
+
+
+CONTROLLER_INIT_MODES = (
+    "distill",
+    "random_init",
+    "non_distill_copy",
+    "full_copy",
+)
+
+
+def controller_init_mode(args):
+    """Resolve the controller start policy, preserving legacy arguments."""
+    mode = getattr(args, "controller_init", None)
+    if mode is None:
+        mode = "distill" if getattr(args, "distill", False) else "random_init"
+    if mode not in CONTROLLER_INIT_MODES:
+        raise ValueError(
+            "Unknown controller_init {!r}; expected one of {}".format(
+                mode, CONTROLLER_INIT_MODES
+            )
+        )
+    return mode
+
+
+def inherits_parent_controller(mode):
+    """Whether offspring need a parent controller reference at creation time."""
+    return mode != "random_init"
 
 
 def _max_maturity_stage(total_step, train_iters):
@@ -49,8 +79,24 @@ def single_agent_fit(agent, ppo_args, trans_args, sample_setting, args,
         ppoAgent = agent.controller
     else:
         ppoAgent = None
-        if args.distill and agent.distill_parent:
+        init_mode = controller_init_mode(args)
+        if init_mode == "distill" and agent.distill_parent:
             ppoAgent = prepare_distilled_controller(agent, ppo_args, trans_args, sample_setting, args, device)
+        elif init_mode in ("non_distill_copy", "full_copy") and agent.distill_parent:
+            parent_controller = copy.deepcopy(agent.distill_parent.best_controller).to(device)
+            copy_mode = (
+                "non_distill_copy"
+                if init_mode == "non_distill_copy"
+                else "full_copy"
+            )
+            ppoAgent = build_copied_child_controller(
+                parent_controller,
+                sample_setting,
+                ppo_args,
+                trans_args,
+                device,
+                copy_mode,
+            )
         if ppoAgent is None:
             # Init PPO Actor-Critic
             actor_critic = TransformerPPOAC(modular_state_dim=sample_setting[0], modular_action_dim=sample_setting[1],
@@ -293,6 +339,7 @@ def run(args):
     global current_iters
     mlp.set_start_method('spawn', force=True)
 
+    init_mode = controller_init_mode(args)
     max_maturity_stage = _max_maturity_stage(args.total_step, args.train_iters)
 
     logger = CustomReporter(args.save_to)
@@ -385,7 +432,7 @@ def run(args):
                 pop_agent,
                 historical_archive,
                 max_maturity_stage,
-                promotion_k=args.pop_size//2,
+                promotion_k=getattr(args, "promotion_k", args.pop_size // 2),
                 lambda_max=getattr(args, "lambda_max", 0.30),
                 lambda_min=getattr(args, "lambda_min", 0.05),
                 lambda_tau=getattr(args, "lambda_tau", 2.0),
@@ -408,7 +455,12 @@ def run(args):
 
         #mutation
         all_children, child_logs = random_mutate_offspring(
-            Survivors, final_candidates, record, child_num, inherit=args.distill)
+            Survivors,
+            final_candidates,
+            record,
+            child_num,
+            inherit=inherits_parent_controller(init_mode),
+        )
 
         logger.end_generation(pop_agent, all_children, child_logs, Survivors)
         pop_agent = Survivors + all_children
