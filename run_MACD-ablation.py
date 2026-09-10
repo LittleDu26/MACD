@@ -1,8 +1,8 @@
 """Run the four population-level MACD ablations.
 
 Examples:
-    python MACD-ablation.py
-    python MACD-ablation.py --ablations MACD-noD MACD-FI --envs Thrower-v0 \
+    python run_MACD-ablation.py
+    python run_MACD-ablation.py --ablations MACD-noD MACD-FI --envs Thrower-v0 \
         --num-runs 3 --threads-num 8
 """
 
@@ -15,6 +15,12 @@ from utils.MyUtils import get_par
 
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_ENVS = (
+    "Walker-v0",
+    "Thrower-v0",
+    "ObstacleTraverser-v1",
+    "GapJumper-v0",
+)
 ABLATIONS = {
     "MACD-noM": {"mmse": False, "controller_init": "distill"},
     "MACD-noI": {"mmse": True, "controller_init": "random_init"},
@@ -27,14 +33,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run MACD population ablations.")
     parser.add_argument("--ablations", nargs="+", choices=tuple(ABLATIONS),
                         default=tuple(ABLATIONS), help="Ablations to run.")
-    parser.add_argument("--envs", nargs="+", default=["Carrier-v0", "Thrower-v0"],
+    parser.add_argument("--envs", nargs="+", default=DEFAULT_ENVS,
                         help="EvoGym environments to evaluate.")
     parser.add_argument("--num-runs", type=int, default=1,
                         help="Independent runs per ablation and environment.")
     parser.add_argument("--seed", type=int, default=101,
                         help="Seed for run 0; later runs increment it by one.")
     parser.add_argument("--target-size", type=int, default=5)
-    parser.add_argument("--threads-num", type=int, default=20)
+    parser.add_argument("--threads-num", type=int, default=8)
     parser.add_argument("--pop-size", type=int, default=20)
     parser.add_argument("--train-iters", type=int, default=64,
                         help="PPO updates per maturity stage (ignored by MACD-noM).")
