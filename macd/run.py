@@ -288,6 +288,8 @@ def select_survivors(population, historical_archive, max_maturity_stage,
 
 
 def run(args):
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     global current_iters
     mlp.set_start_method('spawn', force=True)
 

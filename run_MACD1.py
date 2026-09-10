@@ -56,7 +56,7 @@ if __name__ == "__main__":
     #             "BridgeWalker-v0",
     #             "DownStepper-v0",
     #             "Hurdler-v0"]
-    env_list = ["Walker-v0"]
+    env_list = ["Carrier-v0","Thrower-v0"]
     num=1
 
     for env in env_list:

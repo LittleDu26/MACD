@@ -52,7 +52,7 @@ if __name__ == "__main__":
     args.mmse = True
     args.distill = True
     args.suffix=''
-    env_list = ["Walker-v0"]
+    env_list = ["Carrier-v0","Thrower-v0"]
     # env_list = ["Walker-v0","AreaMaximizer-v0","Carrier-v0",
     #             "Thrower-v0","UpStepper-v0","ObstacleTraverser-v0",
     #             "ObstacleTraverser-v1","GapJumper-v0","BeamSlider-v0"]
