@@ -196,67 +196,70 @@ def attention_distill_warmup(parent_controller, child_controller, observations,
     for param in child_controller.parameters():  # 遍历子模型参数。
         param.requires_grad_(False)  # 默认关闭子模型梯度。
 
-    trainable, gradient_hooks = _enable_qk_layernorm(child_controller)  # 仅开启指定参数训练。
-    optimizer = optim.Adam(trainable, lr=lr_warm)  # 配置 warmup 优化器。
-
-    for _ in range(warmup_epochs):  # 迭代 warmup 轮次。
-        order = np.random.permutation(len(observations))  # 打乱样本顺序。
-        for start in range(0, len(order), batch_size):  # 分批迭代。
-            batch = _stack_obs([observations[i] for i in order[start:start + batch_size]], device)  # 组装批次。
-            parent_batch, child_batch, parent_indices, child_indices = _build_distill_views(
-                batch, parent_robot, child_robot, device
-            )
-
-            loss = 0.0  # 初始化损失累加器。
-            for net_name in ("mu", "v"):  # 对两个头进行蒸馏。
-                if loss_type == "column_kl":
-                    with torch.no_grad():  # 禁用父模型梯度。
-                        _, parent_attn = parent_controller.ac.attention_forward(
-                            parent_batch, net_name=net_name
-                        )
-                        s_parent = _column_importance(parent_attn, parent_indices)
-                    _, child_attn = child_controller.ac.attention_forward(
-                        child_batch, net_name=net_name
+    branch_modules = {
+        "mu": child_controller.ac.mu_net,
+        "v": child_controller.ac.v_net,
+    }
+    branch_trainable = {}
+    branch_hooks = {}
+    branch_optimizers = {}
+    try:
+        for net_name, module in branch_modules.items():
+            trainable, hooks = _enable_qk_layernorm(module)
+            branch_hooks[net_name] = hooks
+            if not trainable:
+                raise ValueError(
+                    "No trainable Q/K or LayerNorm parameters found for {!r} branch".format(
+                        net_name
                     )
-                    s_child = _column_importance(child_attn, child_indices)
-                    loss = loss + lambda_col * _kl_divergence(
-                        s_parent.detach(), s_child
+                )
+            branch_trainable[net_name] = trainable
+            branch_optimizers[net_name] = optim.Adam(trainable, lr=lr_warm)
+
+        actor_parameter_ids = {id(param) for param in branch_trainable["mu"]}
+        critic_parameter_ids = {id(param) for param in branch_trainable["v"]}
+        if actor_parameter_ids & critic_parameter_ids:
+            raise ValueError("Actor and critic distillation parameters must be disjoint")
+
+        for _ in range(warmup_epochs):  # 迭代 warmup 轮次。
+            order = np.random.permutation(len(observations))  # 打乱样本顺序。
+            for start in range(0, len(order), batch_size):  # 分批迭代。
+                batch = _stack_obs(
+                    [observations[i] for i in order[start:start + batch_size]],
+                    device,
+                )
+                parent_batch, child_batch, parent_indices, child_indices = (
+                    _build_distill_views(
+                        batch, parent_robot, child_robot, device
                     )
-                else:
-                    with torch.no_grad():
-                        _, parent_attn, parent_hidden = (
-                            parent_controller.ac.attention_forward(
-                                parent_batch,
-                                net_name=net_name,
-                                return_hidden_states=True,
-                            )
-                        )
-                    _, child_attn, child_hidden = child_controller.ac.attention_forward(
+                )
+
+                for net_name in ("mu", "v"):
+                    optimizer = branch_optimizers[net_name]
+                    trainable = branch_trainable[net_name]
+                    optimizer.zero_grad()
+                    loss = _distill_branch_loss(
+                        parent_controller,
+                        child_controller,
+                        parent_batch,
                         child_batch,
-                        net_name=net_name,
-                        return_hidden_states=True,
-                    )
-                    loss = loss + _shared_branch_loss(
-                        parent_attn,
-                        child_attn,
-                        parent_hidden,
-                        child_hidden,
                         parent_indices,
                         child_indices,
+                        net_name,
                         loss_type,
                         lambda_attention,
                         lambda_feature,
+                        lambda_col,
                     )
-
-            optimizer.zero_grad()  # 清空梯度。
-            loss.backward()  # 反向传播。
-            nn.utils.clip_grad_norm_(trainable, gradient_clip)  # 梯度裁剪。
-            optimizer.step()  # 更新参数。
-
-    for hook in gradient_hooks:
-        hook.remove()
-    for param in child_controller.parameters():  # 遍历子模型参数。
-        param.requires_grad_(True)  # 恢复子模型梯度。
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(trainable, gradient_clip)
+                    optimizer.step()
+    finally:
+        for hooks in branch_hooks.values():
+            for hook in hooks:
+                hook.remove()
+        for param in child_controller.parameters():  # 恢复子模型梯度。
+            param.requires_grad_(True)
 
 
 def prepare_distilled_controller(agent, ppo_args, trans_args, sample_setting, args,device):
@@ -402,6 +405,51 @@ def _kl_divergence(parent_scores, child_scores, eps=1e-8):
     parent_scores = parent_scores.clamp_min(eps)
     child_scores = child_scores.clamp_min(eps)
     return (parent_scores * (parent_scores.log() - child_scores.log())).sum(dim=-1).mean()
+
+
+def _distill_branch_loss(parent_controller, child_controller,
+                         parent_batch, child_batch,
+                         parent_indices, child_indices, net_name, loss_type,
+                         lambda_attention, lambda_feature, lambda_col):
+    if net_name not in ("mu", "v"):
+        raise ValueError("Unknown distillation branch: {!r}".format(net_name))
+
+    if loss_type == "column_kl":
+        with torch.no_grad():
+            _, parent_attn = parent_controller.ac.attention_forward(
+                parent_batch, net_name=net_name
+            )
+            parent_scores = _column_importance(parent_attn, parent_indices)
+        _, child_attn = child_controller.ac.attention_forward(
+            child_batch, net_name=net_name
+        )
+        child_scores = _column_importance(child_attn, child_indices)
+        return lambda_col * _kl_divergence(
+            parent_scores.detach(), child_scores
+        )
+
+    with torch.no_grad():
+        _, parent_attn, parent_hidden = parent_controller.ac.attention_forward(
+            parent_batch,
+            net_name=net_name,
+            return_hidden_states=True,
+        )
+    _, child_attn, child_hidden = child_controller.ac.attention_forward(
+        child_batch,
+        net_name=net_name,
+        return_hidden_states=True,
+    )
+    return _shared_branch_loss(
+        parent_attn,
+        child_attn,
+        parent_hidden,
+        child_hidden,
+        parent_indices,
+        child_indices,
+        loss_type,
+        lambda_attention,
+        lambda_feature,
+    )
 
 
 def _shared_branch_loss(parent_attn, child_attn, parent_hidden, child_hidden,
