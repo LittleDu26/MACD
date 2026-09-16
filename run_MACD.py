@@ -28,9 +28,9 @@ if __name__ == "__main__":
                         help='save_to')
     parser.add_argument('--suffix', type=str, default='',
                         help='experiment name suffix, e.g. XX -> MACD(XX)')
-    parser.add_argument('--distill', action='store_true',
+    parser.add_argument('--distill', action='store_true', default=True,
                         help='')
-    parser.add_argument('--mmse', action='store_true',
+    parser.add_argument('--mmse', action='store_true', default=True,
                         help='')
     parser.add_argument('--promotion_k', type=int, default=10,
                         help='maximum active morphologies promoted each generation')
@@ -49,8 +49,6 @@ if __name__ == "__main__":
     args.threads_num = 20
     args.pop_size = 20
     args.train_iters=64
-    args.mmse = True
-    args.distill = True
     args.suffix=''
     env_list = ["Carrier-v0","Thrower-v0"]
     # env_list = ["Walker-v0","AreaMaximizer-v0","Carrier-v0",
