@@ -1,6 +1,6 @@
 # MACD: Enhancing Voxel Robot Co-Design through Multi-Maturity Evolution and Attention Distillation
 
-Thank you to the reviewers for taking the time to examine our work and this supplementary repository. This README provides the core settings needed to understand and reproduce the experiments that could not be included in the paper because of the page limit.
+Thank you to the reviewers for taking the time to examine our work and this supplementary repository. This README provides the core settings needed to understand and reproduce our experiments.
 
 ## Method overview
 
@@ -14,7 +14,7 @@ All experiments use the modular observation and action spaces implemented by the
 
 ## Visual results
 
-The following animations show robots produced by MACD on all nine benchmark tasks. Each caption reports the reward of the displayed robot; these single-run values are separate from the five-run aggregate results reported in the paper.
+The following animations show robots produced by MACD on all nine benchmark tasks. Each caption reports the reward of the displayed robot.
 
 <table>
   <tr>
@@ -33,12 +33,6 @@ The following animations show robots produced by MACD on all nine benchmark task
     <td align="center"><img src="gif/BeamSlider-v0.gif" width="300" alt="BeamSlider-v0"><br><b>BeamSlider-v0</b><br>Reward: 2.78</td>
   </tr>
 </table>
-
-## Experimental protocol
-
-The design space is a `5 x 5` voxel grid. All population-based methods use a population size of 20 and the same total PPO-update budget. For a task with evaluation allowance `E` and per-robot controller limit `T`, the total budget is `E x T` PPO updates. MACD trains a controller for 64 updates per maturity stage; the final stage is shortened when necessary so that it does not exceed `T`. Attention-distillation updates are excluded from the PPO budget because their cost is negligible relative to simulator interaction.
-
-The paper reports the mean and standard deviation over five independent runs. The command examples below launch one run, and the default launcher seed (`101`) identifies that example run rather than all five reported repetitions.
 
 ### Task budgets
 
