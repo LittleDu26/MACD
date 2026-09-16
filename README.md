@@ -147,7 +147,7 @@ PyTorch is intentionally installed outside `requirements.txt` to select the CPU 
 
 ### 3. Build the bundled simulator
 
-The C++ simulator source and its build dependencies are included under `third_party/simulator/`. Build the platform-specific Python extension directly from this repository:
+The C++ simulator source and its build dependencies are included under `simulator/`. Build the platform-specific Python extension directly from this repository:
 
 ```bash
 bash scripts/build_simulator.sh

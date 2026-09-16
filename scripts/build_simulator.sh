@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SOURCE_DIR="${REPO_ROOT}/third_party/simulator"
+SOURCE_DIR="${REPO_ROOT}/simulator"
 BUILD_DIR="${MACD_SIMULATOR_BUILD_DIR:-${REPO_ROOT}/build/simulator}"
 OUTPUT_DIR="${MACD_SIMULATOR_OUTPUT_DIR:-${REPO_ROOT}/evogym}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
